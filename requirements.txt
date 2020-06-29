@@ -1,0 +1,8 @@
+numpy
+scipy
+matplotlib
+PIL
+pytesseract
+peakdetect
+opencv (cv2)
+opt_lev_analysis
