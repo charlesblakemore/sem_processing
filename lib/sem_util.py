@@ -24,9 +24,12 @@ def get_devnum(filename, device_prefix='dev'):
     ### Image naming convention often includes a standard device prefix
     ### like "dev" which defines a subfolder. Look for this identifier in
     ### a given filename. Function should fail if it can't find anything
-    devstr = re.findall("/{:s}[0-9]+/".format(device_prefix), filename)[0]
-    devnum = int( re.findall("[0-9]+", devstr)[0] )
-    return devnum
+    try:
+        devstr = re.findall("/{:s}[0-9]+/".format(device_prefix), filename)[0]
+        devnum = int( re.findall("[0-9]+", devstr)[0] )
+        return devnum
+    except Exception:
+        return None
 
 
 
@@ -47,7 +50,7 @@ class SEMImage:
 
 
 
-    def load(self, filename, image_bits=16, xsize=1024, ysize=943):
+    def load(self, filename, bit_depth=16.0, xsize=1024, ysize=943):
         '''Load the image into the class container and separate the
            image itself, the information bar, and the scale bar.
 
@@ -56,10 +59,11 @@ class SEMImage:
 
         self.path = filename
         self.full_img_arr = np.array( Image.open(filename) )
+        self.bit_depth = bit_depth
 
         shape = self.full_img_arr.shape
 
-        maxval = shape[1] * (2.0**16 - 1.0)
+        maxval = shape[1] * (2.0**bit_depth - 1.0)
         inds = np.arange(shape[0])[np.sum(self.full_img_arr, axis=1) >= 0.99*maxval]
 
         ### Compute some cropping indices
@@ -81,7 +85,7 @@ class SEMImage:
     def read_scale_bar(self, plot=False, verbose=False):
         '''Try using the Tesseract OCR to automatically read the scale bar.'''
         try:
-            output = image_to_string(self.scale_bar, lang='eng')
+            output = image_to_string(self.scale_bar[:,100:300], lang='eng')
             number = re.search("[0-9]+", output)[0]
             units = re.search("[a-z]+", output)[0]
         except Exception:
@@ -106,7 +110,7 @@ class SEMImage:
 
 
 
-    def calibrate(self, scale_bar_len=0.0, verbose=True, plot=False):
+    def rough_calibrate(self, scale_bar_len=0.0, verbose=True, plot=False):
         '''Using the scale bar portion of the image, find the pixel -> distance
            calibration factor and save this as a class attribute.'''
 
@@ -114,14 +118,12 @@ class SEMImage:
         ### if the automatic procedure fails
         if not scale_bar_len:
 
-            try:
-                self.read_scale_bar(plot=plot, verbose=verbose)
-                scale_bar_len = self.scale_bar_len
+            self.read_scale_bar(plot=plot, verbose=verbose)
+            scale_bar_len = self.scale_bar_len
 
-            except Exception:
-                traceback.print_exc()
+            if not scale_bar_len:
                 print()
-                print("COULDN'T AUTOMATICALLY DETERMINED SCALE BAR SIZE...")
+                print("COULDN'T AUTOMATICALLY DETERMINE SCALE BAR SIZE...")
 
                 plt.imshow(self.full_img_arr, cmap='gray')
                 plt.figure()
@@ -181,26 +183,37 @@ class SEMImage:
 
 
 
-    def find_vertical_edges(self, xinds=(0,-1), yinds=(0,-1), image_bits=16, \
-                            edge_width=10, plot=False, verbose=False):
+    def find_edges(self, xinds=(0,-1), yinds=(0,-1), image_bits=16, \
+                    edge_width=10, plot=False, verbose=False, \
+                    vertical=False, horizontal=False, blur_kernel=3):
+
+        if (not horizontal) and (not vertical):
+            vertical = True
+
+        blur_kernel = int(blur_kernel)
 
         ### Crop the main image according to the inputs
         cropped = self.img_arr[yinds[0]:yinds[1],xinds[0]:xinds[1]]
 
         ### Cast to 8-bit image values
-        temp = (cropped.astype(np.uint16) * (256.0 / (2.0**image_bits)) )
+        temp = (cropped.astype(np.uint16) * (256.0 / (2.0**self.bit_depth)) )
 
         shape = temp.shape
 
         ### Blur the image slightly with gaussian blurring to reduce noise
-        blurred = cv2.blur(temp, (3,3))
+        blurred = cv2.blur(temp, (blur_kernel,blur_kernel))
 
-        ### Compute the horizontal gradient of each row of pixels in the cropped
-        ### image and add these all up, as vertical edges usually have distinctive 
-        ### intensity gradients
-        deriv_sum = np.zeros(shape[1])
-        for row in range(shape[0]):
-            deriv_sum += np.gradient(blurred[row,:])
+        ### Compute the horizontal or vertical gradient of each row of pixels in the 
+        ### cropped image and add these all up, as vertical edges usually have 
+        ### distinctive intensity gradients
+        if vertical:
+            deriv_sum = np.zeros(shape[1])
+            for row in range(shape[0]):
+                deriv_sum += np.gradient(blurred[row,:])
+        else:
+            deriv_sum = np.zeros(shape[0])
+            for col in range(shape[0]):
+                deriv_sum += np.gradient(blurred[:,col])
 
         ### Define some thresholds
         std = np.std(deriv_sum)
@@ -210,8 +223,12 @@ class SEMImage:
         neg_thresh = 0.15 * np.min(deriv_sum)
 
         ### Find the indices above and below the defined thresholds
-        inds_above = np.arange(shape[1])[deriv_sum > pos_thresh]
-        inds_below = np.arange(shape[1])[deriv_sum < neg_thresh]
+        if vertical:
+            all_inds = np.arange(shape[1])
+        else:
+            all_inds = np.arange(shape[0])
+        inds_above = all_inds[deriv_sum > pos_thresh]
+        inds_below = all_inds[deriv_sum < neg_thresh]
 
         pos_peaks = []
         neg_peaks = []
@@ -256,6 +273,9 @@ class SEMImage:
             found_match = False
             for neg_peak_ind, neg_peak in enumerate(neg_peaks):
                 if np.abs(pos_peak[0] - neg_peak[0]) <= edge_width:
+                    ### Avoid double counting closely spaced edges
+                    if neg_peak_ind in neg_done:
+                        continue
                     edge_locations.append([np.average([pos_peak[0], neg_peak[0]], \
                                             weights=np.abs([pos_peak[1], neg_peak[1]])), True])
                     neg_done.append(neg_peak_ind)
@@ -275,26 +295,45 @@ class SEMImage:
         ### peaks identified, as well as the source image itself and the locations of
         ### any edges
         if plot:
-            fig, axarr = plt.subplots( 2,1,figsize=(8,8), sharex=True, \
-                                        gridspec_kw={'height_ratios': (3,2)} )
+            if vertical:
+                fig, axarr = plt.subplots( 2,1,figsize=(8,8), sharex=True, \
+                                            gridspec_kw={'height_ratios': (3,1)} )
+            else:
+                fig, axarr = plt.subplots( 1,2,figsize=(10,8), sharey=True, \
+                                            gridspec_kw={'width_ratios': (3,1)} )
 
-            axarr[0].set_title('Sum of horizontal gradients')
-            axarr[0].plot(deriv_sum)
-            axarr[0].set_xlim((0,shape[1]))
-            for peak in pos_peaks:
-                axarr[0].axvline(peak[0], ls=':', lw=3, color='r')
-            for peak in neg_peaks:
-                axarr[0].axvline(peak[0], ls=':', lw=3, color='b')
 
-            axarr[1].set_title('Found edges')
-            axarr[1].imshow(temp, cmap='gray')
+            if vertical:
+                axarr[1].plot(deriv_sum)
+                axarr[1].set_title('Sum of horizontal gradients')
+                axarr[1].set_xlim((0,shape[1]))
+                for peak in pos_peaks:
+                    axarr[1].axvline(peak[0], ls=':', lw=3, color='r')
+                for peak in neg_peaks:
+                    axarr[1].axvline(peak[0], ls=':', lw=3, color='b')
+            else:
+                axarr[1].plot(deriv_sum, range(shape[0]))
+                axarr[1].set_title('Sum of vertical gradients')
+                axarr[1].set_ylim((0,shape[0]))
+                for peak in pos_peaks:
+                    axarr[1].axhline(peak[0], ls=':', lw=3, color='r')
+                for peak in neg_peaks:
+                    axarr[1].axhline(peak[0], ls=':', lw=3, color='b')
+
+            axarr[0].set_title('Found edges')
+            axarr[0].imshow(temp, cmap='gray')
             for edge in edge_locations:
                 if edge[1]:
                     alpha = 1.0
                 else:
                     alpha = 0.4
-                axarr[1].axvline(edge[0], ls=':', lw=3, color='r', alpha=alpha)
-            axarr[1].set_aspect('auto')
+
+                if vertical:
+                    axarr[0].axvline(edge[0], ls=':', lw=3, color='r', alpha=alpha)
+                else:
+                    axarr[0].axhline(edge[0], ls=':', lw=3, color='r', alpha=alpha)
+
+            axarr[0].set_aspect('auto')
 
             fig.tight_layout()
             plt.show()
@@ -304,50 +343,5 @@ class SEMImage:
             edge_locations[edge_ind][0] += xinds[0]
 
         return edge_locations
-
-
-
-
-    def find_edges(self, xinds=(0,-1), yinds=(0,-1), image_bits=16):
-        '''STILL DEVELOPING THIS FUNCTION. IT JUST PLOTS A BUNCH OF STUFF
-           RIGHT NOW BECAUSE EDGE DETECTION IS HARD.'''
-        maxval = 0.9 * (2.0**8)
-        minval = 0.1 * (2.0**8)
-
-        cropped = self.img_arr[yinds[0]:yinds[1],xinds[0]:xinds[1]]
-
-        temp = (cropped.astype(np.uint16) * (256.0 / (2.0**image_bits)) )
-        img8 = cv2.blur( temp.astype(np.uint8), (5,5) )
-
-        # plt.imshow(img8, cmap='gray')
-        #img8 = cv2.convertScaleAbs(img8, alpha=3.0, beta=-100)
-
-        img8_eq = cv2.blur( cv2.equalizeHist(img8), (5,5))
-        #img8 = cv2.blur(img8, (5,5))
-        # plt.figure()
-        # plt.hist(img8.flatten(), 100)
-        # plt.figure()
-        plt.imshow(img8, cmap='gray')
-        plt.figure()
-        plt.imshow(img8_eq, cmap='gray')
-        # plt.show()
-
-        plt.figure()
-        plt.hist(img8_eq.flatten(), 100)
-        # plt.show()
-
-        edges = cv2.Canny(img8_eq, 125, 200)
-
-        contours, hierarchy = cv2.findContours(edges, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
-
-        img8_cont = cv2.drawContours(img8_eq, contours, -1, color=150, thickness=3)
-
-        plt.figure()
-        plt.imshow(img8_cont)
-
-        plt.figure()
-        plt.imshow(edges, cmap='gray')
-        plt.show()
-
 
 

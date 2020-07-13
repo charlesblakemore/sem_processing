@@ -12,26 +12,13 @@ import sem_util as su
 
 
 
-img_dir = '/Users/manifestation/Stanford/beads/photos/sem/20191014_shield_v2_pc1_second-HF-clean/'
+img_dir = '/Users/manifestation/Stanford/beads/photos/sem/20200624_gbeads-7_5um/'
 max_file = 1000
 
-substr = '2000x_40deg.tif'
+substr = '7_5um_5000x_uc'
+substr = '7_5um_calibration_5000x_uc'
 
-devlist = [#'/dev4/', \
-           #'/dev7/', \
-           #'/dev9/', \
-           #'/dev23/', \
-           #'/dev29/', \
-           #'/dev37/', \
-           #'/dev47/', \
-           #'/dev49/', \
-           #'/dev55/', \
-           '/dev57/', \
-           #'/dev64/', \
-           #'/dev65/', \
-           #'/dev67/', \
-           #'/dev76/', \
-          ]
+devlist = []
 
 with_info = True
 show_after = True
@@ -39,7 +26,7 @@ show_after = True
 
 filenames, _ = find_all_fnames(img_dir, ext='.tif', substr=substr)
 
-filenames.sort(key = su.get_devnum)
+# filenames.sort(key = su.get_devnum)
 
 if len(devlist):
     bad_inds = []
@@ -63,14 +50,22 @@ for fileind, filename in enumerate(filenames[:max_file]):
     
     imgobj = su.SEMImage()
     imgobj.load(filename)
-    #imgobj.calibrate(plot=False)
+
+    imgobj.rough_calibrate(plot=False)
+    imgobj.find_edges(vertical=True, plot=True)
+    imgobj.find_edges(horizontal=True, plot=True)
+    input()
 
     fig, ax = plt.subplots(1,1,figsize=(8,8))
     if with_info:
         ax.imshow(imgobj.full_img_arr, cmap='gray')
     else:
         ax.imshow(imgobj.img_arr, cmap='gray')
-    ax.set_title('Device {:d}'.format(devind))
+    try:
+      ax.set_title('Device {:d}'.format(devind))
+    except TypeError:
+      ax.set_title('No Device ID')
+
     fig.tight_layout()
 
     if not show_after:
