@@ -12,7 +12,7 @@ import sem_util as su
 from bead_util import find_all_fnames
 
 
-
+plt.rcParams.update({'font.size': 14})
 
 
 
@@ -23,12 +23,15 @@ substr = '7_5um_5000x_uc'
 imgs, _ = find_all_fnames(img_dir, ext='.tif', substr=substr)
 
 # gauss_kernel = 10
-gauss_kernel = 15
+gauss_kernel = 9
 
 ### Size of gaussian weighted block for adaptive thresholding. Must be odd integer
-th_block_size = 31
+th_block_size = 15
 # th_block_size = 51  
 constant = 2
+
+
+second_blur = [3, 5, 7, 9]
 
 
 #calibration = np.load('./12000x_calibration.npy')
@@ -41,7 +44,10 @@ savepath = '../data/bead_radii_5000x.npy'
 
 
 plot_debug = False
-plot_contour = True
+plot_contour = False
+plot_circles = False
+plot_ellipses = False
+plot_individual_ellipse = False
 
 
 
@@ -50,6 +56,15 @@ plot_contour = True
 ####################################################################################
 ####################################################################################
 ####################################################################################
+
+
+
+
+def gauss(x, A, mu, sigma):
+    return A * np.exp( -1.0 * (x - mu)**2 / (2 * sigma**2))
+
+
+
 
 ### Routines below find the outer edge of the thick contour defined by
 # radius_adj = 0.5 * (gauss_kernel + th_block_size) + 5
@@ -59,185 +74,262 @@ radius_adj = th_block_size + 2
 
 
 
-bead_radii = []
+bead_circle_data = []
+bead_ellipse_data = []
+
 for filename in imgs:
 
-    if '_001' in filename:
+    if 'bad' in filename:
         continue
+
+    # if '_001' in filename:
+    #     continue
 
     imgobj = su.SEMImage()
     imgobj.load(filename)
 
     imgobj.rough_calibrate(plot=False)
 
-    temp = imgobj.img_arr * (256.0 / (2.0**imgobj.bit_depth))
-    blur = cv2.blur(temp.astype(np.uint8),(gauss_kernel,gauss_kernel))
+    imgobj.make_8bit()
 
-    ret, th1 = cv2.threshold(blur,0,255,\
-                    cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+    temp = np.copy(imgobj.img_arr_8bit)
+    # blur = cv2.blur(temp.astype(np.uint8),(gauss_kernel,gauss_kernel))
+
+    blur = cv2.GaussianBlur(temp, (gauss_kernel, gauss_kernel), 0)
+
 
     th2 = cv2.adaptiveThreshold(blur,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
-            cv2.THRESH_BINARY_INV,th_block_size,constant)
+                                cv2.THRESH_BINARY_INV,th_block_size,constant)
 
     th2_copy = np.copy(th2)
 
-    # if plot_debug:
-    plt.imshow(th1, cmap='gray', alpha=1.0)
+    if plot_debug:
+        plt.figure()
+        plt.imshow(th2, cmap='gray', alpha=1.0)
 
-    plt.figure()
-    plt.imshow(th2, cmap='gray', alpha=1.0)
+        plt.show()
+        input()
 
-    plt.show()
-    input()
 
+    new_blur = cv2.GaussianBlur(th2, (5, 5), 0)
+    _, new_th2 = cv2.threshold(new_blur,220,255,cv2.THRESH_BINARY)
 
     # circles = cv2.HoughCircles(temp.astype(np.uint8), cv2.HOUGH_GRADIENT, 1, 150)
     # circles_blur = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, 1, 150)
-    circles_blur_binary = cv2.HoughCircles(th2, cv2.HOUGH_GRADIENT, 1, 150, \
-                                           param1=100, param2=50, \
-                                           minRadius=80, maxRadius=200)
+    circles_blur_binary = cv2.HoughCircles(new_th2, cv2.HOUGH_GRADIENT, 1, 80, \
+                                           param1=200, param2=20, \
+                                           minRadius=120, maxRadius=160)
 
-    # print(circles)
-    # if circles is not None:
-    #     fig, ax = plt.subplots(1,1)
-    #     ax.imshow(temp.astype(np.uint8), cmap='gray', zorder=1)
-    #     for circle in circles[0]:
-    #         ax.scatter([circle[0]], [circle[1]], color='g', marker='X', s=25, zorder=2)
-    #         plot_circle = plt.Circle([circle[0], circle[1]], circle[2], \
-    #                                  color='r', fill=False, zorder=3)
-    #         ax.add_artist(plot_circle)
+
+    if plot_circles:
+        if circles_blur_binary is not None:
+            fig, ax = plt.subplots(1,1)
+            ax.imshow(new_th2, cmap='gray', zorder=1)
+            for circle in circles_blur_binary[0]:
+                ax.scatter([circle[0]], [circle[1]], color='g', marker='X', s=25, zorder=2)
+                plot_circle = plt.Circle([circle[0], circle[1]], circle[2], \
+                                         color='r', fill=False, zorder=3)
+                ax.add_artist(plot_circle)
+            plt.show()
+            input()
+        else:
+            fig, ax = plt.subplots(1,1)
+            ax.imshow(new_th2, cmap='gray', zorder=1)
+            print('NO CIRCLES FOUND IN THRESHOLD IMAGE')
+
+            plt.show()
+            input()
+
+
+    # contours, hierarchy = \
+    #         cv2.findContours(th2,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+
+    # big_ind = 0
+    # big_area = 0
+    # for ind, contour in enumerate(contours):
+
+    #   moments = cv2.moments(contour)
+    #   area = moments['m00']
+    #   if area > big_area:
+    #       big_area = area
+    #       big_ind = ind
+
+    # derp = cv2.drawContours(th2_copy, contours[big_ind], -1, 126, 3)
+    # if plot_contour:
+    #     # plt.imshow(th2, cmap='gray', alpha=0.5)
+    #     plt.imshow(derp, cmap='gray')
     #     plt.show()
-    #     input()
-    # else:
-    #     print('NO CIRCLES FOUND IN RAW GRAY IMAGE')
+
     #     input()
 
 
-    # if circles_blur is not None:
-    #     fig, ax = plt.subplots(1,1)
-    #     ax.imshow(blur, cmap='gray', zorder=1)
-    #     for circle in circles_blur[0]:
-    #         ax.scatter([circle[0]], [circle[1]], color='g', marker='X', s=25, zorder=2)
-    #         plot_circle = plt.Circle([circle[0], circle[1]], circle[2], \
-    #                                  color='r', fill=False, zorder=3)
-    #         ax.add_artist(plot_circle)
-    #     plt.show()
-    #     input()
-    # else:
-    #     print('NO CIRCLES FOUND IN BLURRED GRAY IMAGE')
-    #     input()
+    # contour_ind = big_ind
+    # center, radius = cv2.minEnclosingCircle(contours[contour_ind])
 
 
-    if circles_blur_binary is not None:
+    if plot_ellipses:
         fig, ax = plt.subplots(1,1)
-        ax.imshow(th2, cmap='gray', zorder=1)
-        for circle in circles_blur_binary[0]:
-            ax.scatter([circle[0]], [circle[1]], color='g', marker='X', s=25, zorder=2)
-            plot_circle = plt.Circle([circle[0], circle[1]], circle[2], \
-                                     color='r', fill=False, zorder=3)
-            ax.add_artist(plot_circle)
-        plt.show()
+        ax.imshow(imgobj.img_arr_8bit, cmap='gray')
+
+
+
+    for circle in circles_blur_binary[0]:
+        # print(circle)
+
+        bead_circle_data.append([circle[0], circle[1], circle[2]-3])
+
+        left = int(circle[0] - 1.1*circle[2])
+        right = int(circle[0] + 1.1*circle[2])
+        top = int(circle[1] - 1.1*circle[2])
+        bot = int(circle[1] + 1.1*circle[2])
+
+        if left < 0:
+            left = 0
+        if top < 0:
+            top = 0
+
+        # mask = np.zeros_like(new_th2)
+        ypixel, xpixel = new_th2.shape
+
+        yvals = np.arange(ypixel)
+        xvals = np.arange(xpixel)
+
+        dists = np.sqrt(np.add.outer((yvals - circle[1])**2, (xvals - circle[0])**2))
+        mask = dists <= circle[2] + 3
+
+        # for yind, yval in enumerate(yvals):
+        #     for xind, xval in enumerate(xvals):
+        #         dist = np.sqrt( (xval - circle[0])**2 + (yval - circle[1])**2 )
+        #         if dist <= circle[2] + 2:
+        #             mask[yind,xind] = 1.0
+
+
+        cropped = (new_th2 * mask)[top:bot,left:right]
+
+        contours, hierarchy = cv2.findContours(cropped,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+        big_ind = 0
+        big_area = 0
+        for ind, contour in enumerate(contours):
+
+          moments = cv2.moments(contour)
+          area = moments['m00']
+          if area > big_area:
+              big_area = area
+              big_ind = ind
+
+        ellipse = cv2.fitEllipse(contours[big_ind])
+        bead_ellipse_data.append([ellipse[0][0]+left, ellipse[0][1]+top, ellipse[1][0]-6, ellipse[1][1]-6, ellipse[2]])
+        # ellipse = cv2.fitEllipse(cropped)
+
+        if plot_ellipses:
+            plot_ellipse = patches.Ellipse((bead_ellipse_data[-1][0], bead_ellipse_data[-1][1]), \
+                                           bead_ellipse_data[-1][2], bead_ellipse_data[-1][3], \
+                                           bead_ellipse_data[-1][4]) 
+            plot_ellipse.set_facecolor('none')
+            plot_ellipse.set_edgecolor('r')
+            plot_ellipse.set_linewidth(3)
+            plot_ellipse.set_linestyle('--')
+            ax.add_artist(plot_ellipse)
+
+
+
+        if plot_individual_ellipse:
+            fig2 = plt.figure()
+            ax2 = fig.add_subplot(111, aspect='equal')
+            ax2.imshow(cropped, cmap='gray')
+            plot_ellipse2 = patches.Ellipse(ellipse[0], ellipse[1][0], \
+                                           ellipse[1][1], ellipse[2]) 
+            plot_ellipse2.set_facecolor('none')
+            plot_ellipse2.set_edgecolor('r')
+            plot_ellipse2.set_linewidth(3)
+            plot_ellipse2.set_linestyle('--')
+            ax2.add_artist(plot_ellipse2)
+
+            # plt.imshow(cropped, cmap='gray')
+            fig2.show()
+
+            input()
+
+    if plot_ellipses:
+        fig.show()
         input()
-    else:
-        print('NO CIRCLES FOUND IN THRESHOLD IMAGE')
-        input()
 
 
-    #ax.imshow(bead, cmap='gray', alpha=0.5
+bead_circle_data = np.array(bead_circle_data)
+bead_ellipse_data = np.array(bead_ellipse_data)
 
-    contours, hierarchy = \
-            cv2.findContours(th2,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+# print(bead_circle_data)
+# print(bead_ellipse_data)
 
-    big_ind = 0
-    big_area = 0
-    for ind, contour in enumerate(contours):
+# plt.figure()
+# plt.hist(cal_fac*bead_circle_data[:,2], 20)
 
-      moments = cv2.moments(contour)
-      area = moments['m00']
-      if area > big_area:
-          big_area = area
-          big_ind = ind
+# plt.figure()
+plot_x = np.linspace(2, 5, 100)
 
-    derp = cv2.drawContours(th2_copy, contours[big_ind], -1, 126, 3)
-    if plot_contour:
-        # plt.imshow(th2, cmap='gray', alpha=0.5)
-        plt.imshow(derp, cmap='gray')
-        plt.show()
+rfig, rax = plt.subplots(3,1,sharex=True,figsize=(6,6),dpi=150)
+chist, bin_edge, _ = rax[0].hist(cal_fac*bead_circle_data[:,2], 30, range=(2, 5), alpha=1.0)
+rax[0].set_title('Radius from HoughCircles')
+bins = bin_edge[:-1] - 0.5*(bin_edge[0] - bin_edge[1])
+popt, pcov = opti.curve_fit(gauss, bins, chist, p0=[np.max(chist), bins[np.argmax(chist)], 0.1])
+rax[0].plot(plot_x, gauss(plot_x, *popt), lw=3, ls='--', color='r', \
+            label='$r = {:0.2f} \\pm {:0.2f}~\\mu m$'.format(popt[1], popt[2]))
+rax[0].legend(loc='upper left')
 
-        input()
+ehist1, _, _ = rax[1].hist(cal_fac*bead_ellipse_data[:,2]/2.0, 30, range=(2, 5), alpha=1.0)
+rax[1].set_title('Ellipse Axis 1')
+popt, pcov = opti.curve_fit(gauss, bins, ehist1, p0=[np.max(ehist1), bins[np.argmax(ehist1)], 0.1])
+rax[1].plot(plot_x, gauss(plot_x, *popt), lw=3, ls='--', color='r', \
+            label='$r = {:0.2f} \\pm {:0.2f}~\\mu m$'.format(popt[1], popt[2]))
+rax[1].legend(loc='upper left')
 
+ehist2, _, _ = rax[2].hist(cal_fac*bead_ellipse_data[:,3]/2.0, 30, range=(2, 5), alpha=1.0)
+rax[2].set_title('Ellipse Axis 2')
+popt, pcov = opti.curve_fit(gauss, bins, ehist2, p0=[np.max(ehist2), bins[np.argmax(ehist2)], 0.1])
+rax[2].plot(plot_x, gauss(plot_x, *popt), lw=3, ls='--', color='r', \
+            label='$r = {:0.2f} \\pm {:0.2f}~\\mu m $'.format(popt[1], popt[2]))
+rax[2].legend(loc='upper left')
+rax[2].set_xlabel('Calibrated Radius [$\\mu$m]')
 
-    contour_ind = big_ind
-
-    center, radius = cv2.minEnclosingCircle(contours[contour_ind])
-
-    ellipse = cv2.fitEllipse(contours[contour_ind])
-
-    new_ellipse = ((ellipse[0][0], ellipse[0][1]), \
-                   (ellipse[1][0]-radius_adj, ellipse[1][1]-radius_adj), \
-                   ellipse[2])
-
-    pixel_diam = np.mean(new_ellipse[1])
-
-    print(0.5*pixel_diam)
-
-    # Calibrate and subtract off metalized coating
-    comp_diam = (pixel_diam * calibration[6]) - (0.1)
-    comp_radius = 0.5 * comp_diam
-
-    comp_radius_err = np.sqrt( comp_radius**2 * ((calibration[7]/calibration[6])**2 + \
-                                (1.0/pixel_diam)**2) + 0.050**2 )
-
-    print('Found radius: ', comp_radius)
-
-    bead_radii.append([comp_radius, comp_radius_err])
+rfig.tight_layout()
 
 
-    if plot_debug:
-
-        new_img = cv2.ellipse(th2, new_ellipse, 126, 3)
-
-        plt.imshow(new_img, cmap='gray')
-        plt.title('ELLIPSE FIT')
-        plt.show()
-
-        input()
 
 
-    if plot_debug:
-        figure = plt.figure()
-        ax = plt.subplot(111)
-        ax.imshow(th2, cmap='gray')
-        new_circle = plt.Circle(center, radius-1, color='r', fill=False)
-        ax.add_artist(new_circle)
-        ax.set_title('CIRCLE FIT')
+
+efig = plt.figure()
+eax = efig.add_subplot(111, polar=True)
+hist, bin_edge = np.histogram(bead_ellipse_data[:,4], bins=20, range=(0,180))
+width = bin_edge[1] - bin_edge[0]
+bins = bin_edge[:-1] + 0.5*width
+
+fit_bins = (bins + 90.0) % 180.0
+
+popt, pcov = opti.curve_fit(gauss, fit_bins, hist, p0=[np.max(hist), fit_bins[np.argmax(hist)], 5])
+
+plot_x = np.linspace(0,180,100)
+eax.bar(fit_bins*(np.pi/180.0), hist, width=width*(np.pi/180.0), bottom=30)
+eax.plot(plot_x*(np.pi/180.0), gauss(plot_x, *popt)+30.0, lw=3, ls='--', color='r', \
+            label='$\\epsilon = {:0.2f} \\pm {:0.2f} $'.format(popt[1], popt[2]))
+eax.set_thetamin(0)
+eax.set_thetamax(180)
+# eax.set_theta_offset(np.pi)
+eax.set_title('Ellipse Orientation Relative to Y-Axis')
+eax.legend(loc='upper right')
+efig.tight_layout()
 
 
-    center_int = (np.uint8(center[0]), np.uint8(center[1]))
-    radius_int = np.uint8(radius)
 
 
-    fig2 = plt.figure()
-    ax2 = fig2.add_subplot(111, aspect='equal')
-    ax2.imshow(temp, cmap='gray')
-    plot_ellipse = patches.Ellipse(new_ellipse[0], new_ellipse[1][0], \
-                                  new_ellipse[1][1], new_ellipse[2]) 
-    plot_ellipse.set_facecolor('none')
-    plot_ellipse.set_edgecolor('r')
-    plot_ellipse.set_linewidth(3)
-    plot_ellipse.set_linestyle('--')
-    ax2.add_artist(plot_ellipse)
 
-    ax2.get_yaxis().set_ticks([])
-    ax2.get_xaxis().set_ticks([])
-    ax2.set_title('ELLIPSE FIT')
+plt.figure()
+plt.title('Centers of Circle/Ellipse')
+plt.scatter(bead_circle_data[:,0], bead_circle_data[:,1], label='HoughCircles', marker='X', s=25)
+plt.scatter(bead_ellipse_data[:,0], bead_ellipse_data[:,1], label='Ellipse Fit', marker='P', s=25)
+plt.xlabel('X-Pixel')
+plt.ylabel('Y-Pixel')
+plt.legend(loc='upper right')
+plt.tight_layout()
 
-    #new_img = cv2.circle(bead, center, radius, 126, 1)
-    #plt.imshow(new_img, cmap='gray')
-    plt.show()
-
-    input()
-
-print(bead_radii)
-#np.save(savepath, bead_radii)
+plt.show()
 

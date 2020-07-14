@@ -81,6 +81,17 @@ class SEMImage:
 
 
 
+    def make_8bit(self):
+        '''Convert images arrays to 8bit values for use with openCV.'''
+
+        self.full_img_arr_8bit = (self.full_img_arr * (256.0 / (2.0**self.bit_depth))).astype(np.uint8)
+        self.img_arr_8bit = (self.img_arr * (256.0 / (2.0**self.bit_depth))).astype(np.uint8)
+
+
+
+
+
+
 
     def read_scale_bar(self, plot=False, verbose=False):
         '''Try using the Tesseract OCR to automatically read the scale bar.'''
@@ -104,6 +115,9 @@ class SEMImage:
             fac = 1.0e-3
 
         self.scale_bar_len = float(number) * fac
+
+
+
 
 
 
@@ -183,6 +197,7 @@ class SEMImage:
 
 
 
+
     def find_edges(self, xinds=(0,-1), yinds=(0,-1), image_bits=16, \
                     edge_width=10, plot=False, verbose=False, \
                     vertical=False, horizontal=False, blur_kernel=3):
@@ -192,16 +207,14 @@ class SEMImage:
 
         blur_kernel = int(blur_kernel)
 
-        ### Crop the main image according to the inputs
-        cropped = self.img_arr[yinds[0]:yinds[1],xinds[0]:xinds[1]]
-
         ### Cast to 8-bit image values
-        temp = (cropped.astype(np.uint16) * (256.0 / (2.0**self.bit_depth)) )
+        self.make_8bit()
+        temp = np.copy(self.img_arr_8bit[yinds[0]:yinds[1],xinds[0]:xinds[1]])
 
         shape = temp.shape
 
         ### Blur the image slightly with gaussian blurring to reduce noise
-        blurred = cv2.blur(temp, (blur_kernel,blur_kernel))
+        blurred = cv2.GaussianBlur(temp, (blur_kernel,blur_kernel), 0)
 
         ### Compute the horizontal or vertical gradient of each row of pixels in the 
         ### cropped image and add these all up, as vertical edges usually have 
