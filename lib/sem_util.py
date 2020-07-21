@@ -448,7 +448,7 @@ class SEMImage:
     def _parse_threshold_indices(self, indices, deriv_sum, exclusion):
         '''Process a list of indices giving the locations of "deriv_sum" above/below 
            a threshold value, finding and averaging the locations and values of 
-           consecutive indices.'''
+           consecutive indices. Assumes indices are monotonic'''
 
         peaks = []
 
@@ -463,7 +463,8 @@ class SEMImage:
             if bad_cond_1:
                 continue
 
-            ### Check the end condition
+            ### Check the end condition, which is necessary to handle peaks that only 
+            ### span a single index, but exist at the end of the list
             end_cond = ind == indices[-1]
 
             if not len(cinds):
@@ -479,11 +480,15 @@ class SEMImage:
                 val = np.mean(deriv_sum[cinds])
                 peaks.append([loc, val])
 
-                ### Start the list over with the new, non-consecutive index
+                ### Start the list over with the new, non-consecutive index.
+                ### If end_cond == True, this behavior doesn't matter
+                cinds = [ind]
+
+                ### Since indices are monotonic, if we reached the edge of the second 
+                ### exclusion zone, there can be no more valid indices and we can break
                 if bad_cond_2:
-                    cinds = []
-                else:
-                    cinds = [ind]
+                    break
+         
             else:
                 cinds.append(ind)
 
