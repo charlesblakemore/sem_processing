@@ -473,7 +473,6 @@ class SEMImage:
                     continue
 
             if (ind - cinds[-1]) > 1 or end_cond:
-
                 ### Append the mean location and mean value of all the most
                 ### most recent set of consecutive indices (a peak)
                 loc = np.mean(cinds)
@@ -483,14 +482,14 @@ class SEMImage:
                 ### Start the list over with the new, non-consecutive index.
                 ### If end_cond == True, this behavior doesn't matter
                 cinds = [ind]
-
-                ### Since indices are monotonic, if we reached the edge of the second 
-                ### exclusion zone, there can be no more valid indices and we can break
-                if bad_cond_2:
-                    break
-         
             else:
                 cinds.append(ind)
+
+
+            ### Since indices are monotonic, if we reached the edge of the second 
+            ### exclusion zone, there can be no more valid indices and we can break
+            if bad_cond_2:
+                break
 
         return peaks
 
