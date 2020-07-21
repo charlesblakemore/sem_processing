@@ -23,7 +23,7 @@ substr = '7_5um_5000x_uc'
 imgs, _ = find_all_fnames(img_dir, ext='.tif', substr=substr)
 
 # gauss_kernel = 10
-gauss_kernel = 9
+blur_kernel = 9
 
 ### Size of gaussian weighted block for adaptive thresholding. Must be odd integer
 th_block_size = 15
@@ -90,81 +90,15 @@ for filename in imgs:
 
     imgobj.rough_calibrate(plot=False)
 
-    imgobj.make_8bit()
 
-    temp = np.copy(imgobj.img_arr_8bit)
-    # blur = cv2.blur(temp.astype(np.uint8),(gauss_kernel,gauss_kernel))
+    circles = imgobj.find_circles(blur_kernel=blur_kernel, th_block_size=th_block_size, \
+                                  constant=constant, min_dist=80, min_radius=120, max_radius=160, \
+                                  Hough_param1=200, Hough_param2=20, radius_adj=-3, \
+                                  plot=True)
 
-    blur = cv2.GaussianBlur(temp, (gauss_kernel, gauss_kernel), 0)
-
-
-    th2 = cv2.adaptiveThreshold(blur,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
-                                cv2.THRESH_BINARY_INV,th_block_size,constant)
-
-    th2_copy = np.copy(th2)
-
-    if plot_debug:
-        plt.figure()
-        plt.imshow(th2, cmap='gray', alpha=1.0)
-
-        plt.show()
-        input()
+    input()
 
 
-    new_blur = cv2.GaussianBlur(th2, (5, 5), 0)
-    _, new_th2 = cv2.threshold(new_blur,220,255,cv2.THRESH_BINARY)
-
-    # circles = cv2.HoughCircles(temp.astype(np.uint8), cv2.HOUGH_GRADIENT, 1, 150)
-    # circles_blur = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, 1, 150)
-    circles_blur_binary = cv2.HoughCircles(new_th2, cv2.HOUGH_GRADIENT, 1, 80, \
-                                           param1=200, param2=20, \
-                                           minRadius=120, maxRadius=160)
-
-
-    if plot_circles:
-        if circles_blur_binary is not None:
-            fig, ax = plt.subplots(1,1)
-            ax.imshow(new_th2, cmap='gray', zorder=1)
-            for circle in circles_blur_binary[0]:
-                ax.scatter([circle[0]], [circle[1]], color='g', marker='X', s=25, zorder=2)
-                plot_circle = plt.Circle([circle[0], circle[1]], circle[2], \
-                                         color='r', fill=False, zorder=3)
-                ax.add_artist(plot_circle)
-            plt.show()
-            input()
-        else:
-            fig, ax = plt.subplots(1,1)
-            ax.imshow(new_th2, cmap='gray', zorder=1)
-            print('NO CIRCLES FOUND IN THRESHOLD IMAGE')
-
-            plt.show()
-            input()
-
-
-    # contours, hierarchy = \
-    #         cv2.findContours(th2,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
-
-    # big_ind = 0
-    # big_area = 0
-    # for ind, contour in enumerate(contours):
-
-    #   moments = cv2.moments(contour)
-    #   area = moments['m00']
-    #   if area > big_area:
-    #       big_area = area
-    #       big_ind = ind
-
-    # derp = cv2.drawContours(th2_copy, contours[big_ind], -1, 126, 3)
-    # if plot_contour:
-    #     # plt.imshow(th2, cmap='gray', alpha=0.5)
-    #     plt.imshow(derp, cmap='gray')
-    #     plt.show()
-
-    #     input()
-
-
-    # contour_ind = big_ind
-    # center, radius = cv2.minEnclosingCircle(contours[contour_ind])
 
 
     if plot_ellipses:
@@ -173,10 +107,10 @@ for filename in imgs:
 
 
 
-    for circle in circles_blur_binary[0]:
+    for circle in circles:
         # print(circle)
 
-        bead_circle_data.append([circle[0], circle[1], circle[2]-3])
+        bead_circle_data.append([circle[0], circle[1], circle[2]])
 
         left = int(circle[0] - 1.1*circle[2])
         right = int(circle[0] + 1.1*circle[2])

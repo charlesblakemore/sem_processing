@@ -21,22 +21,26 @@ max_file = 20
 
 substr = '_2000x.'
 
-show = False
+show = True
 
-save_path = './pre_sputtering.p'
+save_path = '../data/pre_sputtering_2.p'
 # save_path = './post_sputtering.p'
 
 
-devlist = ['/dev4/',   ###\
-           '/dev7/',   ###\
+devlist = [#'/dev2/', \
+           #'/dev4/',   ###\
+           #'/dev7/',   ###\
            #'/dev9/', \
            #'/dev23/', \
-           '/dev29/',   ###\
+           #'/dev29/',   ###\
+           #'/dev36/', \
            #'/dev37/', \
-           '/dev47/',   ###\
-           '/dev49/',   ###\
+           '/dev43/', \
+           #'/dev47/',   ###\
+           #'/dev49/',   ###\
            #'/dev55/', \
            #'/dev57/', \
+           '/dev63/', \
            #'/dev64/', \
            #'/dev65/', \
            #'/dev67/', \
@@ -51,8 +55,11 @@ devlist = ['/dev4/',   ###\
 ### Get the files and downselect as directed
 filenames, _ = find_all_fnames(img_dir, ext='.tif', substr=substr)
 
+### Sort the files by device index, assuming that the string 
+### 'devXXX' exists somewhere in the filename
 filenames.sort(key = su.get_devnum)
 
+### Downselect
 if len(devlist):
     bad_inds = []
     for fileind, filename in enumerate(filenames):
@@ -81,16 +88,26 @@ for fileind, filename in enumerate(filenames[:max_file]):
     imgobj = su.SEMImage()
     imgobj.load(filename)
 
-    imgobj.calibrate(plot=False, verbose=True)
+    imgobj.rough_calibrate(plot=False, verbose=True)
 
     half = int( imgobj.img_arr.shape[1] * 0.5 )
 
-    left_edges = imgobj.find_vertical_edges(yinds=(0,200), xinds=(0,half), plot=False, \
-                                            edge_width=7)
-    right_edges = imgobj.find_vertical_edges(yinds=(0,200), xinds=(half,-1), plot=False, \
-                                             edge_width=7)
+    left_edges = imgobj.find_edges(yinds=(0,200), xinds=(0,half), plot=True, \
+                                   vertical=True, edge_width=10, neg_thresh_fac=0.45, 
+                                   pos_thresh_fac=0.5, blur_kernel=5)
+    right_edges = imgobj.find_edges(yinds=(0,200), xinds=(half,-1), plot=True, \
+                                    vertical=True, edge_width=10, neg_thresh_fac=0.45, 
+                                    pos_thresh_fac=0.5, blur_kernel=5)
+
+    input()
 
     edges = left_edges + right_edges
+    baddies = []
+    for edge_ind, edge in enumerate(edges):
+        if not edge[1]:
+            baddies.append(edge_ind)
+    for baddie in baddies[::-1]:
+        edges.pop(baddie)
 
     delta1 = edges[1][0] - edges[0][0]
     delta2 = edges[2][0] - edges[1][0]
